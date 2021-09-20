@@ -1,0 +1,213 @@
+import argparse
+import os
+import sys
+import time
+from datetime import datetime
+
+import numpy as np
+import spacy
+from aser.extract.aser_extractor import SeedRuleASERExtractor
+from tqdm import trange
+
+sys.path.append('../../')
+from Glucose.utils.utils import *
+
+
+def extract_a_structure(stru: str):
+    """
+    This function extracts the knowledge in GLUCOSE dataset, please check the structure in GLUCOSE general structure
+    columns for detail.
+    :param stru: We take a structure string from GLUCOSE (int)_GeneralStructure column, and we split if by different
+    character to make it a valid dict for parsing.
+    :return: A dict of separated structure. The key should be 'subject', 'object', 'preposition', 'object', etc.
+    That appeared in the general structure.
+    """
+    structure = {}
+    for part in trim(stru).split(']'):
+        if part.split('[')[-1] == '':
+            continue
+        elif '||' in part:
+            structure[part.split('[')[-1]] = trim(part.split('||')[0].replace('{', ''))
+        else:
+            structure[part.split('[')[-1]] = trim(part.split('[')[0].replace('{', '').replace('}_', '').split('||')[0])
+    return structure
+
+
+def structure_to_pure_text(stru: dict):
+    """
+    This function change our extracted structure back to pure text
+    :param stru: The dict structure we just got using the function extract_a_structure(str)
+    :return: Return a string text. For example {'subject':'I', 'verb':'love', 'preposition':'you'} will output
+    'I love you'
+    """
+    parts = []
+    for key in stru.keys():
+        parts.append(stru[key])
+    return " ".join(parts)
+
+
+def replace_by_one_rule(specific_rule: dict, sentence: str):
+    """
+    This function replace a sentence with the given specific replacement dict.
+    :param specific_rule: A dict containing the replacement rule, where the keys are the words to use, the values will
+    be replaced by the keys.
+    :param sentence: A string to be replaced by the dict and given rule.
+    :return: The string after replaced by the rules.
+    """
+    original = sentence.lower()
+    for key in specific_rule.keys():
+        for word in specific_rule[key]:
+            original = original.replace(word, key)
+    original = " ".join([i if i != 'be' else 'is' for i in original.split(' ')])
+    return original.replace('(s)', '').replace('is at there', 'been there').replace('(es)', ''). \
+        replace('is in there', 'been there').replace('is there', 'been there').replace('possess', 'have')
+
+
+def replace_both_head_and_tail(specific_rule: dict, head_str: str, tail_str: str):
+    """
+    This function replace both head and tails by using the function replace_by_one_rule(). It's basically replacing two strings
+    with the same replacement dict.
+    :param specific_rule: A dict containing the replacement rule, where the keys are the words to use, the values will
+    be replaced by the keys.
+    :param head_str: The head string.
+    :param tail_str: The tail string.
+    :return: the replaced head and replaced tail as a tuple
+    """
+    re_head = replace_by_one_rule(specific_rule, head_str)
+    re_tail = replace_by_one_rule(specific_rule, tail_str)
+    return re_head, re_tail
+
+
+def lemma_all_replaced_results(original_result: list):
+    """
+    This function lemmas all the replaced result with the spacy parser. Note that the word will not be replaced if it's
+    lemma is '-PRON-'.
+    :param original_result: A list of strings, each one is replaced head + tail sentence
+    :return: A list of strings, each one is the head + tail after lemmatization.
+    """
+    lemmalized_result = []
+    for h_t in original_result:
+        h_lemma = [str(i.lemma_) if str(i.lemma_) != '-PRON-' else str(i) for i in nlp(str(h_t[0]))]
+        t_lemma = [str(i.lemma_) if str(i.lemma_) != '-PRON-' else str(i) for i in nlp(str(h_t[1]))]
+        lemmalized_result.append((" ".join([i if i != 'be' else 'is' for i in h_lemma]),
+                                  " ".join([i if i != 'be' else 'is' for i in t_lemma])))
+    return lemmalized_result
+
+
+def replace_by_all_rules(rules: list, head_str: str, tail_str: str):
+    """
+    This function takes all of replacement rules and head tail as target strings, it will replace head tail with
+    all the replacement rule in the rules list.
+    :param rules: A list of dictionaries containing all the replacement rules.
+    :param head_str: A string, as the head.
+    :param tail_str: A string, as the tail.
+    :return: A list of string tuples, each one is a (head, tail)
+    """
+    result = []
+    for one_rule in rules:
+        h, t = replace_both_head_and_tail(one_rule, head_str, tail_str)
+        if (h, t) not in result:
+            result.append((h, t))
+    return result
+
+
+def extract_and_match(events, glucose, path: str, arguments):
+    """
+    This is the main extraction function.
+    :param events: A dict as the merged eventuality cache of ASER.
+    :param glucose: The parsed_stru_dict generated by the code preprocess_glucose.py
+    :param path: A string representing the path of where the results will be saved.
+    :param arguments: The arguments parsed after the Argument parser.
+    :return: The fully extracted and matched ASER dict, and the time it take to run the full process.
+    """
+    starttime = time.time()
+    e_extractor = SeedRuleASERExtractor(corenlp_port=arguments.port, corenlp_path=arguments.CorenlpPath)
+    aser_dict = {}
+    save_path = os.path.join(path, 'spacy' if arguments.spacy else 'nonspacy')
+    for i in trange(arguments.start, arguments.end + 1):
+        aser_dict[i] = {}
+        for ind in trange(len(glucose['head'][i])):
+            aser_dict[i][ind] = {'head': [], 'tail': []}
+            pre_head = structure_to_pure_text(extract_a_structure(glucose['head'][i][ind]))
+            pre_tail = structure_to_pure_text(extract_a_structure(glucose['tail'][i][ind]))
+            replaced = replace_by_all_rules(rule, pre_head, pre_tail)
+            if arguments.spacy == 1:
+                replaced_to_extract = lemma_all_replaced_results(replaced)
+            else:
+                replaced_to_extract = replaced
+            for h_t in replaced_to_extract:
+                extracted_heads = e_extractor.extract_from_text(h_t[0])[0][0]
+                extracted_tails = e_extractor.extract_from_text(h_t[1])[0][0]
+                aser_dict[i][ind]['head'].append(list(np.unique(
+                    [" ".join(m_h.words) for m_h in extracted_heads if " ".join(m_h.words) in events.keys()])))
+                aser_dict[i][ind]['tail'].append(list(np.unique(
+                    [" ".join(m_t.words) for m_t in extracted_tails if " ".join(m_t.words) in events.keys()])))
+    endtime = time.time()
+    np.save(os.path.join(save_path, 'glucose_aser_{}_{}_{}'.format(arguments.spacy, arguments.start, arguments.end)),
+            aser_dict)
+    return aser_dict, endtime - starttime
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", type=int, default=9643, help="The Port number stanford NLP will use")
+    parser.add_argument("--CorenlpPath", type=str,
+                        default="/home/software/stanford-corenlp/stanford-corenlp-full-2018-02-27/",
+                        help="Path to the Stanford CoreNLP path")
+    parser.add_argument("--spacy", type=int, default=0, choices=[0, 1], help="Whether use the spacy lemmatizer")
+    parser.add_argument("--start", type=int, help="The list you want to start with", default=1)
+    parser.add_argument("--end", type=int, help="The list you want to end with", default=10)
+    parser.add_argument("--test", type=int, help="Whether test mode or not", default=0)
+    parser.add_argument("--folder_name", type=str, help="The folder name to store the matching result",
+                        default='Final_Version')
+    args = parser.parse_args()
+
+    assert args.start <= args.end, 'The start list number should be <= to the end list number'
+
+    nlp = spacy.load('en_core_web_sm')
+
+    print("Loading merged event and structures!")
+    merged = np.load('../../dataset/merged_event.npy', allow_pickle=True).item()
+    if args.test == 0:
+        structure = np.load('../../dataset/Glucose_parsed_stru_dict.npy', allow_pickle=True).item()
+        Glucose_sentence2id = np.load('../../dataset/Glucose_sentence2id.npy', allow_pickle=True).item()
+        Glucose_id2sentence = np.load('../../dataset/Glucose_id2sentence.npy', allow_pickle=True).item()
+    else:
+        structure = np.load('../test_dict.npy', allow_pickle=True).item()
+    print("Merged event and Structures loaded.")
+
+    folder_name = args.folder_name
+
+    if not os.path.exists(folder_name):
+        os.mkdir(folder_name)
+        os.mkdir(os.path.join(folder_name, 'report'))
+        os.mkdir(os.path.join(folder_name, 'spacy'))
+        os.mkdir(os.path.join(folder_name, 'nonspacy'))
+    if not os.path.exists('../build_graph/'):
+        os.mkdir('../build_graph/')
+    record = open(
+        os.path.join(folder_name, 'report/matching_report_{}_{}_{}.txt'.format(args.spacy, args.start, args.end)), 'w')
+
+    if args.spacy == 1:
+        record.write("\n Using Spacy to lemmatize all words!\n")
+    print("\n Using Spacy to lemmatize all words!\n")
+
+    record.write(
+        "\nPreprocessing List Number {} to {} with spacy status: {}\n".format(args.start, args.end, args.spacy))
+    print("\nPreprocessing List Number {} to {} with spacy status: {}\n".format(args.start, args.end, args.spacy))
+
+    record.write("Sample Rule:")
+    for i in rule[0].keys():
+        record.write("{} <--> {}\n".format(i, rule[0][i]))
+    record.write('\n\nStart Time is: {}\n\n'.format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+
+    extracted, testing_time = extract_and_match(merged, structure, folder_name, args)
+
+    record.write('End Time is: {}\n\n'.format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+    record.write('Time spent in coverage test is {} Hours {} Minutes\n'.format(int(testing_time / 3600),
+                                                                               int((testing_time / 60) % 60)))
+    print("Extracted Finished!\n")
+
+    record.write("All logs and files are saved under the directory {}.\n".format(folder_name))
+    record.close()
+    print("All logs and files are saved under the directory {}.".format(folder_name))
