@@ -1,6 +1,0 @@
-*.pth
-*.pickle
-*.npy
-*.zip
-/models/*
-runs/
