@@ -1,18 +1,3 @@
-r"""
-Example usage:
-
-CUDA_VISIBLE_DEVICES=0 python BertSAGE/train.py \
-    --model kgbert_vb \
-    --load_edge_types ASER \
-    --graph_cach_path /data/tianqing/sehyun/repos/CKGP/atomic_preproc/data/graph_cache/neg_{}_{}_{}_{}_{}.pickle \
-    --negative_sample prepared_neg \
-    --file_path /data/tianqing/sehyun/repos/CKGP/atomic_preproc/data/merged_data/G_atomic_aser_inv_10_shuffle_0.1_negprop_1.pickle \
-    --log_name sehyun_kg_bert_vb_new_graph_all_relations.txt \
-    --node_token_path /data/tianqing/sehyun/repos/CKGP/atomic_preproc/data/graph_cache/id2nodestoken_G_atomic_aser_inv_10_shuffle_0.1_negprop_1.pickle
-
-Try to use CUDA_VISIBLE_DEVICES=x, since --gpu options sometimes work and sometimes don't.
-"""
-
 import warnings
 warnings.filterwarnings("ignore")
 import torch
@@ -102,6 +87,8 @@ parser.add_argument("--neg_prop", default=1.0, type=float, required=False,
                     help="whether to include relation in adj matrix")
 parser.add_argument("--rel_in_neighbor", action="store_true", 
                     help="the proportion of negative sample: num_neg/num_pos")
+parser.add_argument("--save_tokenized", action="store_true", 
+                    help="whether to tokenize all nodes first and save them.")
 
 # save paths
 parser.add_argument("--graph_cache_path", default="graph_cache",
@@ -138,6 +125,7 @@ rel_in_edge = "rel_in_edge" if ("va" in args.model or "relational" in args.model
 rel_in_neighbor = "+neighbor" if args.rel_in_neighbor or args.model == "kgbertsage_va" else ""
 highest_aser_rel = "_highest_aser_rel" if args.highest_aser_rel else ""
 use_nl_rel = "_use_nl_rel" if args.use_nl_relation else ""
+save_tokenized = "_save_token" if args.save_tokenized else ""
 
 graph_cache = os.path.join(args.graph_cache_path, "neg_{}_{}_{}_{}_{}.pickle")
 relation_string = f"{args.target_relation}-{args.target_dataset}-relations"
@@ -147,7 +135,7 @@ graph_cache = graph_cache.format(f"{args.negative_sample}-{args.neg_prop}",
                                  args.load_edge_types,
                                  os.path.basename(file_path).rsplit(".", 1)[0],
                                  relation_string,
-                                 rel_in_edge + rel_in_neighbor + highest_aser_rel + use_nl_rel)
+                                 rel_in_edge + rel_in_neighbor + highest_aser_rel + use_nl_rel + save_tokenized)
 # cache_with_neighbor = graph_cache.rsplit(".", 1)[0] + "+neighbor.pickle"
 # if os.path.exists(cache_with_neighbor):
 #    graph_cache = cache_with_neighbor
@@ -161,7 +149,6 @@ model_dir = os.path.join(
 
 if not os.path.exists(model_dir):
     os.mkdir(model_dir)
-
 
 # Model
 
@@ -208,8 +195,11 @@ logging("set random seed = %d for random, PYTHONHASHSEED, numpy, torch" % seed)
 
 logging(graph_cache)
 if not os.path.exists(graph_cache):
+    id2nodestoken_path = os.path.join(args.graph_cache_path,
+                                  "id2nodestoken_" + os.path.basename(file_path))
     s = time.time()
     data_loader = MultiGraphDataset(file_path, device, args.encoder,
+        node_token_path=id2nodestoken_path,
         target_relation=args.target_relation, target_dataset=args.target_dataset,
         eval_dataset=args.eval_dataset,
         edge_include_rel=("va" in args.model or "relational" in args.model),
@@ -217,7 +207,8 @@ if not os.path.exists(graph_cache):
         negative_sample=args.negative_sample, load_edge_types=args.load_edge_types,
         neg_prop=neg_prop,
         highest_aser_rel=args.highest_aser_rel,
-        use_nl_rel=args.use_nl_relation)
+        use_nl_rel=args.use_nl_relation,
+        save_tokenized=args.save_tokenized)
     with open(graph_cache, "wb") as writer:
         pickle.dump(data_loader,writer,pickle.HIGHEST_PROTOCOL)  
     e = time.time()
@@ -230,13 +221,6 @@ else:
     e = time.time()
     logging(f"after loading graph cache from {graph_cache}"
             f"\ntime taken: {e - s}")
-s = time.time()
-id2nodestoken_path = os.path.join(args.graph_cache_path,
-                                  "id2nodestoken_" + os.path.basename(file_path))
-data_loader.tokenize_nodes(id2nodestoken_path)
-e = time.time()
-logging(f"after tokenizing/loading id2nodestoken"
-        f"\ntime taken: {e - s}")
 
 if "simple" in args.model:
     model = SimpleClassifier(encoder=args.encoder,
@@ -254,6 +238,7 @@ elif 'graphsage' in args.model:
                            adj_lists=data_loader.get_adj_list(),
                            nodes_tokenized=data_loader.get_nodes_tokenized(),
                            device=device,
+                           id2node=data_loader.get_nid2text(),
                            num_layers=args.num_layers,
                            num_neighbor_samples=args.num_neighbor_samples,
                            enc_style=args.encoding_style,
@@ -267,6 +252,7 @@ elif 'kgbert' in args.model:
                         adj_lists=data_loader.get_adj_list() if "sage" in args.model else None,
                         nodes_tokenized=data_loader.get_nodes_tokenized(),
                         relation_tokenized=data_loader.get_relations_tokenized(),
+                        id2node=data_loader.get_nid2text(),
                         enc_style=args.encoding_style,
                         agg_func=args.agg_func,
                         num_neighbor_samples=args.num_neighbor_samples,

@@ -54,7 +54,7 @@ def pad_to_max(seq, val=PAD_VAL):
     return pad_sequence(seq, padding_value=val, batch_first=True)[:, :MAX_SEQ_LENGTH]
 
 class LinkPrediction(nn.Module):
-    def __init__(self, encoder, adj_lists, nodes_tokenized, device,
+    def __init__(self, encoder, adj_lists, nodes_tokenized, device,id2node,
                  num_layers=1, num_neighbor_samples=10, enc_style='single_cls_raw',
                  agg_func='MEAN', num_class=2, include_rel=False, relation_tokenized=None):
         super(LinkPrediction, self).__init__()
@@ -66,6 +66,7 @@ class LinkPrediction(nn.Module):
             num_layers=num_layers,
             input_size=768,
             output_size=768,
+            id2node=id2node,
             adj_lists=adj_lists,
             nodes_tokenized=nodes_tokenized,
             device=device,
@@ -111,7 +112,7 @@ class LinkPrediction(nn.Module):
 
 
 class KGBertClassifier(nn.Module):
-    def __init__(self, encoder, adj_lists, nodes_tokenized, relation_tokenized,
+    def __init__(self, encoder, adj_lists, nodes_tokenized, relation_tokenized, id2node,
                  device, enc_style="single_cls_trans", agg_func="mean", version="kgbert_va",
                  num_neighbor_samples=4):
         super().__init__()
@@ -123,6 +124,7 @@ class KGBertClassifier(nn.Module):
         self.version = version
         self.num_neighbor_samples = num_neighbor_samples
         self.adj_lists = adj_lists
+        self.id2node = id2node
         self.emb_size = 768  # bert's embedding size
         if encoder == "bert":
             self.roberta_model = BertModel.from_pretrained("bert-base-uncased").to(device)
@@ -172,20 +174,23 @@ class KGBertClassifier(nn.Module):
         if self.version[-1] == "a":
             for (head, tail, relation) in edges:
                 if isinstance(head, int) or isinstance(head, torch.Tensor):
-                    head = self.nodes_tokenized[int(head)][:-1].to(self.device)  # remove last [SEP] token
+                    if int(head) in self.nodes_tokenized:
+                        head = self.nodes_tokenized[int(head)][:-1].to(self.device)  # remove last [SEP] token
+                    else:
+                        head = torch.tensor(self.tokenizer.encode(self.id2node[int(head)])[:-1]).to(self.device) # remove last [SEP] token
                 else:
-                    head = self.tokenizer(head)[:-1].to(self.device) # remove last [SEP] token
+                    head = torch.tensor(self.tokenizer.encode(head)[:-1]).to(self.device) # remove last [SEP] token
                 rel = self.relation_tokenized[int(relation)].to(self.device)
                 if isinstance(tail, int) or isinstance(tail, torch.Tensor):
-                    tail = self.nodes_tokenized[int(tail)][1:].to(self.device)  # remove first [CLS] token
+                    if int(tail) in self.nodes_tokenized:
+                        tail = self.nodes_tokenized[int(tail)][1:].to(self.device)  # remove first [CLS] token
+                    else:
+                        tail = torch.tensor(self.tokenizer.encode(self.id2node[int(tail)])[1:]).to(self.device)    
                 else:
-                    tail = self.tokenizer(tail)[1:].to(self.device)
+                    tail = torch.tensor(self.tokenizer.encode(tail)[1:]).to(self.device)
                 sentences.append(torch.cat([head, rel, tail]))
         else:  # version b
-            for (head, tail) in edges:
-                head = self.nodes_tokenized[int(head)].to(self.device)
-                tail = self.nodes_tokenized[int(tail)][1:].to(self.device)  # remove first [CLS] token
-                sentences.append(torch.cat([head, tail]))
+            raise NotImplementedError
 
         attention_mask = [torch.ones_like(input_id) for input_id in sentences]
         tokens['input_ids'] = pad_to_max(sentences).to(self.device)
@@ -523,7 +528,7 @@ class SimpleClassifier(nn.Module):
         del adj_lists
         super(SimpleClassifier, self).__init__()
         self.nodes_tokenized = nodes_tokenized
-        self.nodes_text = nodes_text  # to check the correctness
+        self.nodes_text = nodes_text  # to check the correctness. node2id
         self.device = device
         if encoder == "bert":
             # self.tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
@@ -601,17 +606,23 @@ class SimpleClassifier(nn.Module):
                 input_ids = []  # (batch_size, max_length)
                 for (head, tail, relation) in edges:
                     if isinstance(head, torch.Tensor) or isinstance(head, int):
-                        head = self.nodes_tokenized[int(head)].to(self.device)
+                        if int(head) in self.nodes_tokenized:
+                            head = self.nodes_tokenized[int(head)].to(self.device)
+                        else:
+                            head = torch.tensor(self.tokenizer.encode(self.nodes_text[int(head)])).to(self.device) # remove last [SEP] token    
                     elif isinstance(head, str):
-                        head = self.tokenizer(head).to(self.device) # remove last [SEP] token
+                        head = torch.tensor(self.tokenizer.encode(head)).to(self.device) # remove last [SEP] token
                     else:
                         # others not supported
                         print(type(head))
                         assert False
                     if isinstance(tail, torch.Tensor) or isinstance(tail, int):
-                        tail = self.nodes_tokenized[int(tail)].to(self.device)
+                        if int(tail) in self.nodes_tokenized:
+                            tail = self.nodes_tokenized[int(tail)].to(self.device)
+                        else:
+                            tail = torch.tensor(self.tokenizer.encode(self.nodes_text[int(tail)])).to(self.device) # remove last [SEP] token
                     elif isinstance(tail, str):
-                        tail = self.tokenizer(tail).to(self.device) # remove last [SEP] token
+                        tail = torch.tensor(self.tokenizer.encode(tail)).to(self.device) # remove last [SEP] token
                     else:
                         print(type(tail))
                         assert False
@@ -688,7 +699,7 @@ class SageLayer(nn.Module):
 class GraphSage(nn.Module):
     """docstring for GraphSage"""
 
-    def __init__(self, encoder, num_layers, input_size, output_size,
+    def __init__(self, encoder, num_layers, input_size, output_size,id2node,
                  adj_lists, nodes_tokenized, device, agg_func='MEAN', num_neighbor_samples=10,
                  enc_style='single_cls_raw', relation_tokenized=None,
                  with_rel=False):
@@ -704,6 +715,7 @@ class GraphSage(nn.Module):
         self.agg_func = agg_func
         self.num_neighbor_samples = num_neighbor_samples
         self.enc_style = enc_style
+        self.id2node=id2node
         if encoder == "bert":
             self.roberta_model = BertModel.from_pretrained("bert-base-uncased").to(device)
             self.tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
@@ -771,7 +783,9 @@ class GraphSage(nn.Module):
 
         tokens = {}
         if 'single' in self.enc_style:
-            input_ids = [self.nodes_tokenized[int(node)].to(self.device) if not isinstance(node, str) else self.tokenizer(node).to(self.device)  for node in all_nodes]
+            input_ids = [self.nodes_tokenized.get(int(node), 
+                torch.tensor(self.tokenizer.encode(self.id2node[int(node)]))).to(self.device)\
+             if not isinstance(node, str) else torch.tensor(self.tokenizer.encode(node)).to(self.device)  for node in all_nodes]
             attention_mask = [torch.ones_like(input_id) for input_id in input_ids]
             tokens['input_ids'] = pad_to_max(input_ids).to(self.device)
             tokens['attention_mask'] = pad_to_max(attention_mask).to(self.device)
