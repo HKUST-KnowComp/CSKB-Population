@@ -81,13 +81,12 @@ class LinkPrediction(nn.Module):
     def forward(self, edges, b_s):
         if isinstance(edges, torch.Tensor):
             # previous version
-            if edges.shape[1] == 3:
-                nodes = edges[:, :2]
-                relations = edges[:, 2]
-                all_nodes = nodes.reshape([-1])
-                data = [all_nodes, relations]
-            else:
-                data = edges.reshape([-1])
+            assert edges.shape[1] == 3
+            nodes = edges[:, :2]
+            relations = edges[:, 2]
+            all_nodes = nodes.reshape([-1])
+            data = [all_nodes, relations]
+
         elif isinstance(edges, list):
             # current version. Include nodes not in node2id
             data = []
@@ -218,15 +217,23 @@ class KGBertClassifier(nn.Module):
         neigh_input_ids = []
         if self.version[-1] == "a":
             for node_id, (neigh_id, rel_id) in all_neighbors:
-                node = self.nodes_tokenized[int(node_id)][:-1].to(self.device)
+                if int(node_id) in self.nodes_tokenized:
+                    node = self.nodes_tokenized[int(node_id)][:-1].to(self.device)
+                else:
+                    node = torch.tensor(self.tokenizer.encode(self.id2node[int(node_id)])[:-1]).to(self.device)
                 rel = self.relation_tokenized[int(rel_id)].to(self.device)
-                neighbor_node = self.nodes_tokenized[int(neigh_id)][1:].to(self.device)
+                if int(neigh_id) in self.nodes_tokenized:
+                    neighbor_node = self.nodes_tokenized[int(neigh_id)][1:].to(self.device)
+                else:
+                    neighbor_node = torch.tensor(self.tokenizer.encode(self.id2node[int(neigh_id)])[1:]).to(self.device)
                 neigh_input_ids.append(torch.cat([node, rel, neighbor_node]))
         else:
-            for node_id, neigh_id in all_neighbors:
-                node = self.nodes_tokenized[int(node_id)].to(self.device)
-                neighbor_node = self.nodes_tokenized[int(neigh_id)][1:].to(self.device)
-                neigh_input_ids.append(torch.cat([node, neighbor_node]))
+            # version b
+            raise NotImplementedError
+            # for node_id, neigh_id in all_neighbors:
+            #     node = self.nodes_tokenized[int(node_id)].to(self.device)
+            #     neighbor_node = self.nodes_tokenized[int(neigh_id)][1:].to(self.device)
+            #     neigh_input_ids.append(torch.cat([node, neighbor_node]))
 
         neigh_attention_mask = [torch.ones_like(input_id) for input_id in neigh_input_ids]
         neigh_tokens['input_ids'] = pad_to_max(neigh_input_ids).to(self.device)
@@ -600,36 +607,33 @@ class SimpleClassifier(nn.Module):
 
         tokens = {}
         if 'single' in self.enc_style:
-            if e_s != 3:
-                input_ids = [self.nodes_tokenized[int(node)].to(self.device) for node in all_nodes]
-            else:
-                input_ids = []  # (batch_size, max_length)
-                for (head, tail, relation) in edges:
-                    if isinstance(head, torch.Tensor) or isinstance(head, int):
-                        if int(head) in self.nodes_tokenized:
-                            head = self.nodes_tokenized[int(head)].to(self.device)
-                        else:
-                            head = torch.tensor(self.tokenizer.encode(self.nodes_text[int(head)])).to(self.device) # remove last [SEP] token    
-                    elif isinstance(head, str):
-                        head = torch.tensor(self.tokenizer.encode(head)).to(self.device) # remove last [SEP] token
+            input_ids = []  # (batch_size, max_length)
+            for (head, tail, relation) in edges:
+                if isinstance(head, torch.Tensor) or isinstance(head, int):
+                    if int(head) in self.nodes_tokenized:
+                        head = self.nodes_tokenized[int(head)].to(self.device)
                     else:
-                        # others not supported
-                        print(type(head))
-                        assert False
-                    if isinstance(tail, torch.Tensor) or isinstance(tail, int):
-                        if int(tail) in self.nodes_tokenized:
-                            tail = self.nodes_tokenized[int(tail)].to(self.device)
-                        else:
-                            tail = torch.tensor(self.tokenizer.encode(self.nodes_text[int(tail)])).to(self.device) # remove last [SEP] token
-                    elif isinstance(tail, str):
-                        tail = torch.tensor(self.tokenizer.encode(tail)).to(self.device) # remove last [SEP] token
+                        head = torch.tensor(self.tokenizer.encode(self.nodes_text[int(head)])).to(self.device) # remove last [SEP] token    
+                elif isinstance(head, str):
+                    head = torch.tensor(self.tokenizer.encode(head)).to(self.device) # remove last [SEP] token
+                else:
+                    # others not supported
+                    print(type(head))
+                    assert False
+                if isinstance(tail, torch.Tensor) or isinstance(tail, int):
+                    if int(tail) in self.nodes_tokenized:
+                        tail = self.nodes_tokenized[int(tail)].to(self.device)
                     else:
-                        print(type(tail))
-                        assert False
-                    rel = self.relation_tokenized[int(relation)].to(self.device)
-                    # rel is encoded without [CLS] or [SEP]. Add them here
-                    rel = torch.cat([head[0:1], rel, head[-1:]])
-                    input_ids.extend([head, tail, rel])
+                        tail = torch.tensor(self.tokenizer.encode(self.nodes_text[int(tail)])).to(self.device) # remove last [SEP] token
+                elif isinstance(tail, str):
+                    tail = torch.tensor(self.tokenizer.encode(tail)).to(self.device) # remove last [SEP] token
+                else:
+                    print(type(tail))
+                    assert False
+                rel = self.relation_tokenized[int(relation)].to(self.device)
+                # rel is encoded without [CLS] or [SEP]. Add them here
+                rel = torch.cat([head[0:1], rel, head[-1:]])
+                input_ids.extend([head, tail, rel])
             attention_mask = [torch.ones_like(input_id) for input_id in input_ids]
             tokens['input_ids'] = pad_to_max(input_ids).to(self.device)
             tokens['attention_mask'] = pad_to_max(attention_mask).to(self.device)

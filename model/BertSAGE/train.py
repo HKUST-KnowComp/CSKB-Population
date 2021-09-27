@@ -85,8 +85,6 @@ parser.add_argument("--negative_sample", default='prepared_neg', type=str, requi
                     help="nagative sample methods")
 parser.add_argument("--neg_prop", default=1.0, type=float, required=False,
                     help="whether to include relation in adj matrix")
-parser.add_argument("--rel_in_neighbor", action="store_true", 
-                    help="the proportion of negative sample: num_neg/num_pos")
 parser.add_argument("--save_tokenized", action="store_true", 
                     help="whether to tokenize all nodes first and save them.")
 
@@ -122,7 +120,6 @@ file_path = args.file_path
 
 # whether it's a triple classification task (h, r, t)
 rel_in_edge = "rel_in_edge" if ("va" in args.model or "relational" in args.model) else ""
-rel_in_neighbor = "+neighbor" if args.rel_in_neighbor or args.model == "kgbertsage_va" else ""
 highest_aser_rel = "_highest_aser_rel" if args.highest_aser_rel else ""
 use_nl_rel = "_use_nl_rel" if args.use_nl_relation else ""
 save_tokenized = "_save_token" if args.save_tokenized else ""
@@ -135,7 +132,7 @@ graph_cache = graph_cache.format(f"{args.negative_sample}-{args.neg_prop}",
                                  args.load_edge_types,
                                  os.path.basename(file_path).rsplit(".", 1)[0],
                                  relation_string,
-                                 rel_in_edge + rel_in_neighbor + highest_aser_rel + use_nl_rel + save_tokenized)
+                                 rel_in_edge + highest_aser_rel + use_nl_rel + save_tokenized)
 # cache_with_neighbor = graph_cache.rsplit(".", 1)[0] + "+neighbor.pickle"
 # if os.path.exists(cache_with_neighbor):
 #    graph_cache = cache_with_neighbor
@@ -203,7 +200,6 @@ if not os.path.exists(graph_cache):
         target_relation=args.target_relation, target_dataset=args.target_dataset,
         eval_dataset=args.eval_dataset,
         edge_include_rel=("va" in args.model or "relational" in args.model),
-        neighbor_include_rel=args.model == "kgbertsage_va" or args.rel_in_neighbor,
         negative_sample=args.negative_sample, load_edge_types=args.load_edge_types,
         neg_prop=neg_prop,
         highest_aser_rel=args.highest_aser_rel,

@@ -16,7 +16,7 @@ from functools import partial
 
 import argparse
 parser = argparse.ArgumentParser()
-parser.add_argument("--model_name", default='simple', type=str, required=False,
+parser.add_argument("--model_name", default='kgbert_va', type=str, required=False,
                     choices=["graphsage_relational","simple_relational",
                     "kgbert_va", "kgbertsage_va"],
                     help="Name of the model.")
@@ -33,7 +33,8 @@ parser.add_argument("--neigh_num",
                     type=int, required=False,
                     help="Number of neighbors that are aggregated in KGBertSAGE or BertSAGE.")
 parser.add_argument("--model_path", 
-                    default="/home/data/tfangaa/CKGP/model_data/models/neg_prepared_neg-1.0_ASER_G_nodefilter_aser_all_inv_10_shuffle_10_other10_negprop_1_all-all-relations_rel_in_edge+neighbor/kgbert_va_single_cls_trans_best_bert_bs32_opt_ADAM_lr5e-05_decay1.0_500_acc_seed401.pth.step.{}", 
+                    # default="data/models/neg_prepared_neg-1.0_ASER_G_nodefilter_aser_all_inv_10_shuffle_10_other10_negprop_1_all-all-relations_rel_in_edge/kgbertsage_va_single_cls_trans_best_bert_bs32_opt_ADAM_lr5e-05_decay1.0_500_layer1_neighnum_{neighnum}_graph_ASER_f1_aggfuncMEAN_seed401.pth.step.{step}", 
+                    default="/home/data/tfangaa/CKGP/model_data/models/neg_prepared_neg-1.0_ASER_G_nodefilter_aser_all_inv_10_shuffle_10_other10_negprop_1_all-all-relations_rel_in_edge+neighbor/kgbertsage_release/kgbertsage_va_single_cls_trans_best_bert_bs32_opt_ADAM_lr5e-05_decay1.0_500_layer1_neighnum_{neighnum}_graph_ASER_acc_aggfuncMEAN_seed401.pth.step.{step}",
                     type=str, required=False,
                     help="Path to the saved models.")
 parser.add_argument("--evaluation_file_path", 
@@ -41,10 +42,11 @@ parser.add_argument("--evaluation_file_path",
                     type=str, required=False,
                     help="Path to the evaluation set csv.")
 
+args = parser.parse_args()
 test_batch_size = 128
 MAX_NODE_LENGTH=10
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+
 all_relations = [
         "xWant", "oWant", "general Want",
         "xEffect", "oEffect", "general Effect",
@@ -149,7 +151,7 @@ elif 'graphsage' in model_name:
     model = LinkPrediction(encoder="bert",
                            adj_lists=graph_dataset.get_adj_list(),
                            nodes_tokenized=graph_dataset.get_nodes_tokenized(),
-                           id2node=data_loader.get_nid2text(),
+                           id2node=graph_dataset.get_nid2text(),
                            device=device,
                            num_layers=1,
                            num_neighbor_samples=4,
@@ -164,7 +166,7 @@ elif 'kgbert' in model_name:
             adj_lists=graph_dataset.get_adj_list() if "sage" in model_name else None,
             nodes_tokenized=graph_dataset.get_nodes_tokenized(),
             relation_tokenized=graph_dataset.get_relations_tokenized(),
-            id2node=data_loader.get_nid2text(),
+            id2node=graph_dataset.get_nid2text(),
             enc_style="single_cls_trans",
             agg_func="MEAN",
             num_neighbor_samples=neighnum,

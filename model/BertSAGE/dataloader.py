@@ -74,7 +74,6 @@ class MultiGraphDataset():
         target_dataset="all",
         eval_dataset="all",
         edge_include_rel=False,
-        neighbor_include_rel=False,
         load_edge_types="ASER",
         negative_sample="prepared_neg",
         neg_prop=1.0,
@@ -155,9 +154,9 @@ class MultiGraphDataset():
         # some encoder dictionaries
         self.rel2id = {rel: i for i, rel in enumerate(CS_RELATIONS["all"], 1)}
         self.id2rel = dict(enumerate(CS_RELATIONS["all"], 1))
-        if neighbor_include_rel and load_edge_types != "CS":
-            self.rel2id.update({rel: i for i, rel in enumerate(ASER_RELATIONS, len(CS_RELATIONS["all"]) + 1)})
-            self.id2rel.update(dict(enumerate(ASER_RELATIONS, len(CS_RELATIONS["all"]) + 1)))
+
+        self.rel2id.update({rel: i for i, rel in enumerate(ASER_RELATIONS, len(CS_RELATIONS["all"]) + 1)})
+        self.id2rel.update(dict(enumerate(ASER_RELATIONS, len(CS_RELATIONS["all"]) + 1)))
 
         self.node2id = {node: i for i, node in enumerate(G.nodes())}
         self.id2node = dict(enumerate(G.nodes()))
@@ -315,24 +314,21 @@ class MultiGraphDataset():
                 if isinstance(feat["relation"], dict):
                     edge = (self.node2id[head], self.node2id[tail])
                     if edge not in val_edges_dict and edge not in test_edges_dict:
-                        if not neighbor_include_rel:
-                            self.adj_list[self.node2id[head]].append(self.node2id[tail])
+                        relations = []
+                        aser = list(set(ASER_RELATIONS) & set(feat["relation"]))
+                        relations.extend([(self.rel2id[rel], feat["relation"][rel]) for rel in aser])
+                        # [(rel_id, weight_in_aser)]
+                        if len(relations) == 0:
+                            continue
+                        if highest_aser_rel:
+                            # select the aser relation with the highest weight as the relation
+                            # discard other relations
+                            rel, weight = sorted(relations, key=lambda x:x[1], reverse=True)[0]
+                            self.adj_list[self.node2id[head]].append((self.node2id[tail], rel))
                         else:
-                            relations = []
-                            aser = list(set(ASER_RELATIONS) & set(feat["relation"]))
-                            relations.extend([(self.rel2id[rel], feat["relation"][rel]) for rel in aser])
-                            # [(rel_id, weight_in_aser)]
-                            if len(relations) == 0:
-                                continue
-                            if highest_aser_rel:
-                                # select the aser relation with the highest weight as the relation
-                                # discard other relations
-                                rel, weight = sorted(relations, key=lambda x:x[1], reverse=True)[0]
+                            # include all relations
+                            for rel, weight in relations:
                                 self.adj_list[self.node2id[head]].append((self.node2id[tail], rel))
-                            else:
-                                # include all relations
-                                for rel, weight in relations:
-                                    self.adj_list[self.node2id[head]].append((self.node2id[tail], rel))
                 else:
                     pass
 
