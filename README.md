@@ -70,7 +70,7 @@ Download the annotated [evaluation_set.csv](https://hkustconnect-my.sharepoint.c
 
 Some model checkpoints in the paper is uploaded [here](https://hkustconnect-my.sharepoint.com/:f:/g/personal/tfangaa_connect_ust_hk/ElBOmqQ8bm5NjkuaUnrAaj0B1mU0cyFWr3LLlc0tEKvZVg?e=URjyua).
 
-
+Data from Baidu Net disk: https://pan.baidu.com/s/1Bu_TlJpk4RFS1k2ezvbt5Q  password: v4ib
 
 
 
