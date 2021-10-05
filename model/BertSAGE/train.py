@@ -197,7 +197,8 @@ if not os.path.exists(graph_cache):
     s = time.time()
     data_loader = MultiGraphDataset(file_path, device, args.encoder,
         node_token_path=id2nodestoken_path,
-        target_relation=args.target_relation, target_dataset=args.target_dataset,
+        target_relation=args.target_relation, 
+        target_dataset=args.target_dataset,
         eval_dataset=args.eval_dataset,
         edge_include_rel=("va" in args.model or "relational" in args.model),
         negative_sample=args.negative_sample, load_edge_types=args.load_edge_types,

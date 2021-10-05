@@ -1,5 +1,5 @@
 # CSKB-Population
-Codes for the EMNLP2021 paper: Benchmarking Commonsense Knowledge Base Population with an Effective Evaluation Dataset
+Codes for the EMNLP2021 paper: [Benchmarking Commonsense Knowledge Base Population with an Effective Evaluation Dataset](https://arxiv.org/abs/2109.07679)
 
 ## Dataset Preprocess
 
@@ -70,6 +70,9 @@ Download the annotated [evaluation_set.csv](https://hkustconnect-my.sharepoint.c
 
 Some model checkpoints in the paper is uploaded [here](https://hkustconnect-my.sharepoint.com/:f:/g/personal/tfangaa_connect_ust_hk/ElBOmqQ8bm5NjkuaUnrAaj0B1mU0cyFWr3LLlc0tEKvZVg?e=URjyua).
 
+## Reproduce DISCOS using current version of ASER\_norm
+
+Checkout the `DISCOS-reproduce` folder
 
 
 
