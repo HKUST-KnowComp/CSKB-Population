@@ -24,7 +24,7 @@ parser.add_argument("--model", default='simple', type=str, required=False,
                     "kgbertsage_va", "kgbertsage_vb"],
                     help="choose model")
 parser.add_argument("--encoder", default='bert', type=str, required=False,
-                    choices=["bert", "roberta"],
+                    choices=["bert", "roberta", "bert_large", "roberta_large"],
                     help="choose encoder")
 parser.add_argument("--num_layers", default=1, type=int, required=False,
                     help="number of graphsage layers")

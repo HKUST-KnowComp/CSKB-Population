@@ -7,10 +7,16 @@ import torch.nn as nn
 import torch.nn.functional as F
 from sklearn.metrics import classification_report
 from torch.nn.utils.rnn import pad_sequence
-from transformers import BertModel, RobertaModel, BertTokenizer
+from transformers import BertModel, RobertaModel, BertTokenizer, RobertaTokenizer
+from dataloader import CS_RELATIONS, ASER_RELATIONS
+
+id2rel = dict(enumerate(CS_RELATIONS["all"], 1))
+id2rel.update(dict(enumerate(ASER_RELATIONS, len(CS_RELATIONS["all"]) + 1)))
 
 MAX_SEQ_LENGTH = 30
 PAD_VAL = 0
+
+embedding_dim_dict = {"bert":768, "bert_large":1024, "roberta":768}
 
 def eval(data_loader,
          model,
@@ -64,8 +70,8 @@ class LinkPrediction(nn.Module):
         self.graph_model = GraphSage(
             encoder=encoder,
             num_layers=num_layers,
-            input_size=768,
-            output_size=768,
+            input_size=embedding_dim_dict[encoder],
+            output_size=embedding_dim_dict[encoder],
             id2node=id2node,
             adj_lists=adj_lists,
             nodes_tokenized=nodes_tokenized,
@@ -75,7 +81,7 @@ class LinkPrediction(nn.Module):
             enc_style=enc_style,
             relation_tokenized=relation_tokenized)
 
-        emb_dim = 768 * (3 if include_rel else 2)
+        emb_dim = embedding_dim_dict[encoder] * (3 if include_rel else 2)
         self.link_classifier = Classification(emb_dim, num_class, device)
 
     def forward(self, edges, b_s):
@@ -124,12 +130,16 @@ class KGBertClassifier(nn.Module):
         self.num_neighbor_samples = num_neighbor_samples
         self.adj_lists = adj_lists
         self.id2node = id2node
-        self.emb_size = 768  # bert's embedding size
+        self.emb_size = embedding_dim_dict[encoder]  # bert's embedding size
         if encoder == "bert":
             self.roberta_model = BertModel.from_pretrained("bert-base-uncased").to(device)
             self.tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+        elif encoder == "bert_large":
+            self.roberta_model = BertModel.from_pretrained("bert-large-uncased").to(device)
+            self.tokenizer = BertTokenizer.from_pretrained("bert-large-uncased")
         elif encoder == "roberta":
             self.roberta_model = RobertaModel.from_pretrained('roberta-base').to(device)
+            self.tokenizer = RobertaTokenizer.from_pretrained("roberta-base")
         if "kgbertsage" in version:
             # custom sage layer
             self.sage_layer = nn.Linear(self.emb_size * 3, self.emb_size).to(device)
@@ -139,8 +149,8 @@ class KGBertClassifier(nn.Module):
             self.link_classifier = Classification(self.emb_size, 10, device)
 
         # used for aggregate function
-        self.fill_tensor = torch.nn.Parameter(torch.zeros(1, 768)).to(self.device)
-        self.bilinear = torch.nn.Parameter(torch.rand(768, 768)).to(self.device)
+        self.fill_tensor = torch.nn.Parameter(torch.zeros(1, embedding_dim_dict[encoder])).to(self.device)
+        self.bilinear = torch.nn.Parameter(torch.rand(embedding_dim_dict[encoder], embedding_dim_dict[encoder])).to(self.device)
 
     def get_roberta_embs(self, tokens):
         """
@@ -179,7 +189,7 @@ class KGBertClassifier(nn.Module):
                         head = torch.tensor(self.tokenizer.encode(self.id2node[int(head)])[:-1]).to(self.device) # remove last [SEP] token
                 else:
                     head = torch.tensor(self.tokenizer.encode(head)[:-1]).to(self.device) # remove last [SEP] token
-                rel = self.relation_tokenized[int(relation)].to(self.device)
+                rel = torch.tensor(self.tokenizer.encode(id2rel[int(relation)], add_special_tokens=False)).to(self.device)
                 if isinstance(tail, int) or isinstance(tail, torch.Tensor):
                     if int(tail) in self.nodes_tokenized:
                         tail = self.nodes_tokenized[int(tail)][1:].to(self.device)  # remove first [CLS] token
@@ -316,13 +326,13 @@ class KGBertClassifier(nn.Module):
             # print("here!")
             # assert self_feats != None, "attentive aggregation requires self features"
             agg_list = []
-            # self_feats: 128*768
+            # self_feats: 128*embedding_dim_dict[encoder]
             for neighbors, self_feat in zip(neighbors_list, self_feats):
                 if len(neighbors) == 0:
                     agg_list.append(self.fill_tensor)
                     continue
                 neighbor_emb = neigh_embs[[int(neighbor2id[n]) for n in neighbors]]  # n_neighbor, embeddings
-                # neighbor_emb: 4*768
+                # neighbor_emb: 4*embedding_dim_dict[encoder]
                 # p rint(self_feat.shape)
                 attn = torch.mm(torch.mm(neighbor_emb, self.bilinear), self_feat.unsqueeze(-1)).squeeze(-1)
                 attn_s = torch.softmax(attn, 0)
@@ -349,7 +359,7 @@ class BaselineClassifier(nn.Module):
         self.version = version
         self.num_neighbor_samples = num_neighbor_samples
         self.adj_lists = adj_lists
-        self.emb_size = 768  # bert's embedding size
+        self.emb_size = embedding_dim_dict[encoder]  # bert's embedding size
         if encoder == "bert":
             self.roberta_model = BertModel.from_pretrained("bert-base-uncased").to(device)
         elif encoder == "roberta":
@@ -363,8 +373,8 @@ class BaselineClassifier(nn.Module):
             self.link_classifier = Classification(self.emb_size, 10, device)
 
         # used for aggregate function
-        self.fill_tensor = torch.nn.Parameter(torch.rand(1, 768)).to(self.device)
-        self.bilinear = torch.nn.Parameter(torch.rand(768, 768)).to(self.device)
+        self.fill_tensor = torch.nn.Parameter(torch.rand(1, embedding_dim_dict[encoder])).to(self.device)
+        self.bilinear = torch.nn.Parameter(torch.rand(embedding_dim_dict[encoder], embedding_dim_dict[encoder])).to(self.device)
 
     def get_roberta_embs(self, tokens):
         """
@@ -509,13 +519,13 @@ class BaselineClassifier(nn.Module):
             # print("here!")
             # assert self_feats != None, "attentive aggregation requires self features"
             agg_list = []
-            # self_feats: 128*768
+            # self_feats: 128*embedding_dim_dict[encoder]
             for neighbors, self_feat in zip(neighbors_list, self_feats):
                 if len(neighbors) == 0:
                     agg_list.append(self.fill_tensor)
                     continue
                 neighbor_emb = neigh_embs[[int(neighbor2id[n]) for n in neighbors]]  # n_neighbor, embeddings
-                # neighbor_emb: 4*768
+                # neighbor_emb: 4*embedding_dim_dict[encoder]
                 # p rint(self_feat.shape)
                 attn = torch.mm(torch.mm(neighbor_emb, self.bilinear), self_feat.unsqueeze(-1)).squeeze(-1)
                 attn_s = torch.softmax(attn, 0)
@@ -540,6 +550,8 @@ class SimpleClassifier(nn.Module):
         if encoder == "bert":
             # self.tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
             self.roberta_model = BertModel.from_pretrained("bert-base-uncased").to(device)
+        elif encoder == "bert_large":
+            self.roberta_model = BertModel.from_pretrained("bert-large-uncased").to(device)
         elif encoder == "roberta":
             self.roberta_model = RobertaModel.from_pretrained('roberta-base').to(device)
             # self.tokenizer = RobertaTokenizer.from_pretrained("roberta-base")
@@ -549,11 +561,11 @@ class SimpleClassifier(nn.Module):
         self.relation_tokenized = relation_tokenized
 
         if "pair" in enc_style:
-            encode_dim = 768
+            encode_dim = embedding_dim_dict[encoder]
         elif include_rel:
-            encode_dim = 768 * 3
+            encode_dim = embedding_dim_dict[encoder] * 3
         else:
-            encode_dim = 768 * 2
+            encode_dim = embedding_dim_dict[encoder] * 2
         self.link_classifier = Classification(encode_dim, num_class, device)
 
     def get_roberta_embs(self, tokens, padded_sequences=None):
@@ -723,6 +735,9 @@ class GraphSage(nn.Module):
         if encoder == "bert":
             self.roberta_model = BertModel.from_pretrained("bert-base-uncased").to(device)
             self.tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+        elif encoder == "bert_large":
+            self.roberta_model = BertModel.from_pretrained("bert-large-uncased").to(device)
+            self.tokenizer = BertTokenizer.from_pretrained("bert-large-uncased")
         elif encoder == "roberta":
             self.roberta_model = RobertaModel.from_pretrained('roberta-base').to(device)
         print("using agg func {}".format(self.agg_func))
@@ -733,9 +748,9 @@ class GraphSage(nn.Module):
         for index in range(1, num_layers + 1):
             layer_size = self.out_size if index != 1 else self.input_size
             setattr(self, 'sage_layer' + str(index), SageLayer(layer_size, self.out_size).to(device))
-        # self.fill_tensor = torch.FloatTensor(1, 768).fill_(0).to(self.device)
-        self.fill_tensor = torch.nn.Parameter(torch.rand(1, 768)).to(self.device)
-        self.bilinear = torch.nn.Parameter(torch.rand(768, 768)).to(self.device)
+        # self.fill_tensor = torch.FloatTensor(1, embedding_dim_dict[encoder]).fill_(0).to(self.device)
+        self.fill_tensor = torch.nn.Parameter(torch.rand(1, embedding_dim_dict[encoder])).to(self.device)
+        self.bilinear = torch.nn.Parameter(torch.rand(embedding_dim_dict[encoder], embedding_dim_dict[encoder])).to(self.device)
 
     def get_roberta_embs(self, tokens):
         """
@@ -915,13 +930,13 @@ class GraphSage(nn.Module):
             # print("here!")
             # assert self_feats != None, "attentive aggregation requires self features"
             agg_list = []
-            # self_feats: 128*768
+            # self_feats: 128*embedding_dim_dict[encoder]
             for neighbors, self_feat in zip(neighbors_list, self_feats):
                 if len(neighbors) == 0:
                     agg_list.append(self.fill_tensor)
                     continue
                 neighbor_emb = pre_hidden_embs[[int(all_nodes_idx[n]) for n in neighbors]]  # n_neighbor, embeddings
-                # neighbor_emb: 4*768
+                # neighbor_emb: 4*embedding_dim_dict[encoder]
                 # p rint(self_feat.shape)
                 attn = torch.mm(torch.mm(neighbor_emb, self.bilinear), self_feat.unsqueeze(-1)).squeeze(-1)
                 attn_s = torch.softmax(attn, 0)

@@ -20,6 +20,9 @@ parser.add_argument("--model_name", default='kgbert_va', type=str, required=Fals
                     choices=["graphsage_relational","simple_relational",
                     "kgbert_va", "kgbertsage_va"],
                     help="Name of the model.")
+parser.add_argument("--encoder", default='kgbert_va', type=str, required=False,
+                    choices=["bert", "bert_large", "roberta", "roberta_large"],
+                    help="Pretrained encoder.")
 parser.add_argument("--graph_cache_path", 
                     default="data/graph_cache/neg_prepared_neg-1.0_ASER_G_nodefilter_aser_all_inv_10_shuffle_10_other10_negprop_1_all-all-relations_rel_in_edge.pickle", 
                     type=str, required=False,
@@ -68,6 +71,7 @@ node_token_path = args.node_token_path
 model_name = args.model_name
 neighnum = args.neigh_num
 model_path = args.model_path
+encoder = args.encoder
 
 with open(graph_cache, "rb") as reader:
     graph_dataset = pickle.load(reader)
@@ -128,7 +132,7 @@ def get_labels(votes_list):
     return labels
 
 
-step_range = range(250, 20001, 250)
+step_range = range(250, 30001, 250)
 steps_dict = dict([(step, dict([(rel, { "auc":0,})  for rel in all_relations]), 
                         ) for step in step_range])
 
@@ -137,7 +141,7 @@ steps_dict = dict([(step, dict([(rel, { "auc":0,})  for rel in all_relations]),
 
 
 if "simple" in model_name:
-    model = SimpleClassifier(encoder="bert",
+    model = SimpleClassifier(encoder=encoder,
                              adj_lists=graph_dataset.get_adj_list(),
                              nodes_tokenized=graph_dataset.get_nodes_tokenized(),
                              nodes_text=graph_dataset.get_nid2text(),
@@ -148,7 +152,7 @@ if "simple" in model_name:
                              relation_tokenized=graph_dataset.get_relations_tokenized()
                              )
 elif 'graphsage' in model_name:
-    model = LinkPrediction(encoder="bert",
+    model = LinkPrediction(encoder=encoder,
                            adj_lists=graph_dataset.get_adj_list(),
                            nodes_tokenized=graph_dataset.get_nodes_tokenized(),
                            id2node=graph_dataset.get_nid2text(),
@@ -162,7 +166,7 @@ elif 'graphsage' in model_name:
                            relation_tokenized=graph_dataset.get_relations_tokenized()
                            )
 elif 'kgbert' in model_name:
-    model = KGBertClassifier(encoder="bert",
+    model = KGBertClassifier(encoder=encoder,
             adj_lists=graph_dataset.get_adj_list() if "sage" in model_name else None,
             nodes_tokenized=graph_dataset.get_nodes_tokenized(),
             relation_tokenized=graph_dataset.get_relations_tokenized(),

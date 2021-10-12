@@ -79,7 +79,9 @@ class MultiGraphDataset():
         neg_prop=1.0,
         highest_aser_rel=False,
         use_nl_rel=False,
-        save_tokenized=False):
+        save_tokenized=False,
+        save_rel_tokenized=False,
+        no_graph_debug=False):
         """
         Args:
             graph_data_path (str): 
@@ -127,6 +129,7 @@ class MultiGraphDataset():
         del negative_sample, neg_prop  # unused (deprecated)
 
         self.save_tokenized = save_tokenized # whether to save all tokenized sentences
+        self.save_rel_tokenized = save_rel_tokenized # whether to save all tokenized relations
 
         assert load_edge_types in ["CS", "ASER", "CS+ASER"], \
             "should be in [\"CS\", \"ASER\", \"CS+ASER\"]"
@@ -267,6 +270,16 @@ class MultiGraphDataset():
             "tst": [0] * len(negative_edges["tst"]),
         }
 
+        # for debug
+        if len(negative_edges["trn"]) > max_train_num:
+            for i, mode in enumerate(["trn", "dev", "tst"]):
+                trim_idx = np.random.permutation(len(negative_edges[mode]))[:int(max_train_num * split[i]/split[0])]
+                negative_edges[mode] = list(np.array(negative_edges[mode])[trim_idx])
+                negative_labels[mode] = list(np.array(negative_labels[mode])[trim_idx])
+            print('Number of positive training examples after trucating:{}, validating:{}, testing:{}'.format(
+                len(negative_labels["trn"]), len(negative_labels["dev"]), len(negative_labels["tst"])))
+
+
         for mode in ["trn", "dev", "tst"]:
             mode_edges = negative_edges[mode] + positive_edges[mode]
             mode_labels = negative_labels[mode] + positive_labels[mode]
@@ -298,61 +311,70 @@ class MultiGraphDataset():
         ### 4. Prepare a adj matrix, mask all the valid and test set
         ########################
 
-        # adj list that contains all the training edges
-        self.adj_list = [[] for i in range(len(self.id2node))]
 
-        # Edges are all the edges except for those in test/val set
-        val_edges_dict = {(edge[0], edge[1]) for edge in positive_edges["dev"]}
-        test_edges_dict = {(edge[0], edge[1]) for edge in positive_edges["tst"]}
+        # debugging KG-Bert. No need to have graph
+        if not no_graph_debug:
+            # adj list that contains all the training edges
+            self.adj_list = [[] for i in range(len(self.id2node))]
 
-        for head, tail, feat in G.edges.data():
-            if load_edge_types == "CS+ASER":
-                raise NotImplementedError
-            elif load_edge_types == "CS":
-                raise NotImplementedError
-            elif load_edge_types == "ASER":
-                if isinstance(feat["relation"], dict):
-                    edge = (self.node2id[head], self.node2id[tail])
-                    if edge not in val_edges_dict and edge not in test_edges_dict:
-                        relations = []
-                        aser = list(set(ASER_RELATIONS) & set(feat["relation"]))
-                        relations.extend([(self.rel2id[rel], feat["relation"][rel]) for rel in aser])
-                        # [(rel_id, weight_in_aser)]
-                        if len(relations) == 0:
-                            continue
-                        if highest_aser_rel:
-                            # select the aser relation with the highest weight as the relation
-                            # discard other relations
-                            rel, weight = sorted(relations, key=lambda x:x[1], reverse=True)[0]
-                            self.adj_list[self.node2id[head]].append((self.node2id[tail], rel))
-                        else:
-                            # include all relations
-                            for rel, weight in relations:
+            # Edges are all the edges except for those in test/val set
+            val_edges_dict = {(edge[0], edge[1]) for edge in positive_edges["dev"]}
+            test_edges_dict = {(edge[0], edge[1]) for edge in positive_edges["tst"]}
+
+            for head, tail, feat in G.edges.data():
+                if load_edge_types == "CS+ASER":
+                    raise NotImplementedError
+                elif load_edge_types == "CS":
+                    raise NotImplementedError
+                elif load_edge_types == "ASER":
+                    if isinstance(feat["relation"], dict):
+                        edge = (self.node2id[head], self.node2id[tail])
+                        if edge not in val_edges_dict and edge not in test_edges_dict:
+                            relations = []
+                            aser = list(set(ASER_RELATIONS) & set(feat["relation"]))
+                            relations.extend([(self.rel2id[rel], feat["relation"][rel]) for rel in aser])
+                            # [(rel_id, weight_in_aser)]
+                            if len(relations) == 0:
+                                continue
+                            if highest_aser_rel:
+                                # select the aser relation with the highest weight as the relation
+                                # discard other relations
+                                rel, weight = sorted(relations, key=lambda x:x[1], reverse=True)[0]
                                 self.adj_list[self.node2id[head]].append((self.node2id[tail], rel))
-                else:
-                    pass
+                            else:
+                                # include all relations
+                                for rel, weight in relations:
+                                    self.adj_list[self.node2id[head]].append((self.node2id[tail], rel))
+                    else:
+                        pass
 
         ########################
         ### 5. Tokenize nodes and relations
         ########################
 
         self.id2nodestoken = {}
-
-        if encoder == "bert":
-            self.tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
-        elif encoder == "roberta":
-            self.tokenizer = RobertaTokenizer.from_pretrained("roberta-base")
+        self.id2reltoken = {}
         
         # NOTE: id2reltoken is used for KG Bert type a. However, it might also be
         # useful in later application, so keeping it alive.
-        if use_nl_rel:
-            # use the natural language explanations to encode the relation
-            # CS_RELATIONS_2NL
-            self.id2reltoken = { self.rel2id[rel]:torch.tensor(self.tokenizer.encode(
-                CS_RELATIONS_2NL.get(rel, rel), add_special_tokens=False)).to(device) for rel in tqdm(self.rel2id)}
-        else:
-            self.id2reltoken = {self.rel2id[rel]: torch.tensor(self.tokenizer.encode(
-                rel, add_special_tokens=False)).to(device) for rel in tqdm(self.rel2id)}
+
+        if self.save_rel_tokenized or self.save_tokenized:
+            if encoder == "bert":
+                self.tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+            elif encoder == "bert_large":
+                self.tokenizer = BertTokenizer.from_pretrained("bert-large-uncased")
+            elif encoder == "roberta":
+                self.tokenizer = RobertaTokenizer.from_pretrained("roberta-base")
+
+        if self.save_rel_tokenized:
+            if use_nl_rel:
+                # use the natural language explanations to encode the relation
+                # CS_RELATIONS_2NL
+                self.id2reltoken = { self.rel2id[rel]:torch.tensor(self.tokenizer.encode(
+                    CS_RELATIONS_2NL.get(rel, rel), add_special_tokens=False)).to(device) for rel in tqdm(self.rel2id)}
+            else:
+                self.id2reltoken = {self.rel2id[rel]: torch.tensor(self.tokenizer.encode(
+                    rel, add_special_tokens=False)).to(device) for rel in tqdm(self.rel2id)}
 
         if self.save_tokenized:
             self.tokenize_nodes(node_token_path)
