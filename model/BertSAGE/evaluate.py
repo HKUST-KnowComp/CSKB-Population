@@ -272,9 +272,9 @@ for rel in all_relations:
         best_step, best_dev_auc = sorted([(step, steps_dict[step][rel]["auc"]) for step in steps_dict],
                                      key=lambda x:x[1], reverse=True)[0]
     if "kgbertsage" in model_path:
-        model.load_state_dict(torch.load(model_path.format(neighnum=neighnum, step=step)))
+        model.load_state_dict(torch.load(model_path.format(neighnum=neighnum, step=best_step)))
     else:
-        model.load_state_dict(torch.load(model_path.format(step)))
+        model.load_state_dict(torch.load(model_path.format(best_step)))
 
     model.eval()
     
