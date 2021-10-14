@@ -12,7 +12,7 @@ from utils import get_logger, get_gpu_usage
 import argparse
 import pickle
 import gc
-
+from evaluate_utils import get_val_auc, get_dataset, get_test_auc_scores
 
 parser = argparse.ArgumentParser()
 
@@ -64,6 +64,10 @@ parser.add_argument("--eval_on", default='link_prediction', type=str, required=F
                     help="evaluate on link prediction or the human annotated tuples")
 parser.add_argument("--use_nl_relation", action="store_true",
                         help="whether to use natural language to encode relation")
+parser.add_argument("--evaluation_file_path", 
+                    default="data/evaluation_set.csv", 
+                    type=str, required=False,
+                    help="Path to the evaluation set csv.")
 
 # data related
 parser.add_argument("--highest_aser_rel", action="store_true",
@@ -133,9 +137,6 @@ graph_cache = graph_cache.format(f"{args.negative_sample}-{args.neg_prop}",
                                  os.path.basename(file_path).rsplit(".", 1)[0],
                                  relation_string,
                                  rel_in_edge + highest_aser_rel + use_nl_rel + save_tokenized)
-# cache_with_neighbor = graph_cache.rsplit(".", 1)[0] + "+neighbor.pickle"
-# if os.path.exists(cache_with_neighbor):
-#    graph_cache = cache_with_neighbor
 
 if not os.path.exists(args.model_dir):
     os.mkdir(args.model_dir)
@@ -150,28 +151,28 @@ if not os.path.exists(model_dir):
 # Model
 
 if "simple" in args.model:
-    model_save_path = os.path.join(model_dir, '{}_{}_best_{}_bs{}_opt_{}_lr{}_decay{}_{}_{}_seed{}.pth'\
+    model_save_path = os.path.join(model_dir, '{}_{}_best_{}_bs{}_opt_{}_lr{}_decay{}_{}_{}_{}_seed{}.pth'\
     .format(args.model, args.encoding_style, args.encoder, batch_size, args.optimizer,
-        args.lr, args.lrdecay, args.decay_every, args.metric, args.seed))
-    log_path = os.path.join(model_dir, '{}_{}_best_{}_bs{}_opt_{}_lr{}_decay{}_{}_{}_{}_seed{}.log' \
+        args.lr, args.lrdecay, args.decay_every, args.metric, args.eval_on, args.seed))
+    log_path = os.path.join(model_dir, '{}_{}_best_{}_bs{}_opt_{}_lr{}_decay{}_{}_{}_{}_{}_seed{}.log' \
                             .format(args.model, args.encoding_style, args.encoder, batch_size, args.optimizer,
-                                    args.lr, args.lrdecay, args.decay_every, args.metric, args.log_name, args.seed))
+                                    args.lr, args.lrdecay, args.decay_every, args.metric, args.eval_on, args.log_name, args.seed))
 elif "sage" in args.model:  # graphsage, kgbertsage
-    model_save_path = os.path.join(model_dir, '{}_{}_best_{}_bs{}_opt_{}_lr{}_decay{}_{}_layer{}_neighnum_{}_graph_{}_{}_aggfunc{}_seed{}.pth'\
+    model_save_path = os.path.join(model_dir, '{}_{}_best_{}_bs{}_opt_{}_lr{}_decay{}_{}_layer{}_neighnum_{}_graph_{}_{}_{}_aggfunc{}_seed{}.pth'\
                         .format(args.model, args.encoding_style, args.encoder, batch_size, args.optimizer, args.lr,
                             args.lrdecay, args.decay_every, args.num_layers, 
-                            args.num_neighbor_samples, args.load_edge_types, args.metric, args.agg_func, args.seed))
-    log_path = os.path.join(model_dir, '{}_{}_best_{}_bs{}_opt_{}_lr{}_decay{}_{}_layer{}_neighnum_{}_graph_{}_{}_aggfunc{}_{}_seed{}.log'\
+                            args.num_neighbor_samples, args.load_edge_types, args.metric, args.eval_on, args.agg_func, args.seed))
+    log_path = os.path.join(model_dir, '{}_{}_best_{}_bs{}_opt_{}_lr{}_decay{}_{}_layer{}_neighnum_{}_graph_{}_{}_{}_aggfunc{}_{}_seed{}.log'\
                         .format(args.model, args.encoding_style, args.encoder, batch_size, args.optimizer, args.lr,
                             args.lrdecay, args.decay_every, args.num_layers,
-                            args.num_neighbor_samples, args.load_edge_types, args.metric, args.agg_func, args.log_name, args.seed))
+                            args.num_neighbor_samples, args.load_edge_types, args.metric, args.eval_on, args.agg_func, args.log_name, args.seed))
 elif "kgbert_" in args.model:
-    model_save_path = os.path.join(model_dir, '{}_{}_best_{}_bs{}_opt_{}_lr{}_decay{}_{}_{}_seed{}.pth'\
+    model_save_path = os.path.join(model_dir, '{}_{}_best_{}_bs{}_opt_{}_lr{}_decay{}_{}_{}_{}_seed{}.pth'\
     .format(args.model, args.encoding_style, args.encoder, batch_size, args.optimizer,
-        args.lr, args.lrdecay, args.decay_every, args.metric, args.seed))
-    log_path = os.path.join(model_dir, '{}_{}_best_{}_bs{}_opt_{}_lr{}_decay{}_{}_{}_{}_seed{}.log' \
+        args.lr, args.lrdecay, args.decay_every, args.metric, args.eval_on, args.seed))
+    log_path = os.path.join(model_dir, '{}_{}_best_{}_bs{}_opt_{}_lr{}_decay{}_{}_{}_{}_{}_seed{}.log' \
                             .format(args.model, args.encoding_style, args.encoder, batch_size, args.optimizer,
-                                    args.lr, args.lrdecay, args.decay_every, args.metric, args.log_name, args.seed))
+                                    args.lr, args.lrdecay, args.decay_every, args.metric, args.eval_on, args.log_name, args.seed))
 
 tensorboard_dir = os.path.join(args.tensorboard_dir,
                                os.path.basename(model_dir),
@@ -271,12 +272,21 @@ best_valid_acc = 0
 best_test_acc = 0   
 best_valid_f1 = 0
 best_test_f1 = 0 
+best_val_auc = 0
+best_test_auc = 0
 
 my_lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer=optimizer, gamma=args.lrdecay)
 
-logging("metric: {}".format(args.metric))
 writer = SummaryWriter(log_dir=tensorboard_dir)
 
+
+# for eval
+infer_file = pd.read_csv(args.evaluation_file_path)
+eval_dataset = get_dataset(data_loader, infer_file)
+dataset_dev = pd.DataFrame(eval_dataset["dev"])
+dataset_tst = pd.DataFrame(eval_dataset["tst"])
+dataset_tst.insert(len(dataset_tst.columns), "prediction_value", np.zeros((len(dataset_tst), 1)))
+dataset_tst.insert(len(dataset_tst.columns), "final_label", np.zeros((len(dataset_tst), 1), dtype=np.int64))
 
 for epoch in range(num_epochs):
     for batch in data_loader.get_batch(batch_size=batch_size, mode="train"):
@@ -329,6 +339,13 @@ for epoch in range(num_epochs):
                 writer.add_scalars("acc", {"val": val_acc, "test": test_acc}, step)
                 writer.add_scalars("f1", {"val": val_f1, "test": test_f1}, step)
             elif args.eval_on == "human_annotation":
-                pass
+                val_auc = get_val_auc(model, dataset_dev)
+                if val_auc >= best_val_auc:
+                    best_val_auc = val_auc
+                    test_auc, relation_break_down_auc, main_result_auc = get_test_auc_scores(model, dataset_tst)
+                    logging("epoch {}, step {}, val auc: {}, test auc: {}".format(epoch, step, best_val_auc, test_auc))
+                    logging("relational break down: " + relation_break_down_auc)
+                    logging("class break down: " + main_result_auc)
+                    torch.save(model.state_dict(), model_save_path)
             elif args.eval_on == "none":
                 print("epoch {}, step {}, no evaluation".format(epoch, step))
