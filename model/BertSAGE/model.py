@@ -226,12 +226,18 @@ class KGBertClassifier(nn.Module):
         neigh_tokens = {}
         neigh_input_ids = []
         if self.version[-1] == "a":
-            for node_id, (neigh_id, rel_id) in all_neighbors:
+            for node_id, (neigh_id, relation) in all_neighbors:
                 if int(node_id) in self.nodes_tokenized:
                     node = self.nodes_tokenized[int(node_id)][:-1].to(self.device)
                 else:
                     node = torch.tensor(self.tokenizer.encode(self.id2node[int(node_id)])[:-1]).to(self.device)
-                rel = self.relation_tokenized[int(rel_id)].to(self.device)
+                if isinstance(relation, int):
+                    rel = torch.tensor(self.tokenizer.encode(id2rel[int(relation)], add_special_tokens=False)).to(self.device)
+                elif isinstance(relation, str):
+                    rel = torch.tensor(self.tokenizer.encode(relation, add_special_tokens=False)).to(self.device)
+                else:
+                    raise NotImplementedError
+                # rel = self.relation_tokenized[int(relation)].to(self.device)
                 if int(neigh_id) in self.nodes_tokenized:
                     neighbor_node = self.nodes_tokenized[int(neigh_id)][1:].to(self.device)
                 else:

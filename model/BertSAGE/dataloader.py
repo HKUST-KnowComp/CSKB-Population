@@ -77,7 +77,7 @@ class MultiGraphDataset():
         load_edge_types="ASER",
         negative_sample="prepared_neg",
         neg_prop=1.0,
-        highest_aser_rel=False,
+        aser_rel_format=False,
         use_nl_rel=False,
         save_tokenized=False,
         save_rel_tokenized=False,
@@ -119,8 +119,8 @@ class MultiGraphDataset():
             neg_pop: the ratio [neg: pos] of negative sampling
                 **This is deprecated with the new version of the graph. Always using
                 all the prepared negative samples only.
-            highest_aser_rel (bool): 
-                whether to use select the aser relation with the highest weight
+            aser_rel_format (bool): 
+                how to deal with multiple relations in an aser edge.
             use_nl_rel (bool): 
                 whether to use natural language to encode relations.
             save_tokenized (bool):
@@ -308,7 +308,7 @@ class MultiGraphDataset():
         }
 
         ########################
-        ### 4. Prepare a adj matrix, mask all the valid and test set
+        ### 4. Prepare a adj matrix, mask all the valid and test set edges
         ########################
 
 
@@ -336,10 +336,20 @@ class MultiGraphDataset():
                             # [(rel_id, weight_in_aser)]
                             if len(relations) == 0:
                                 continue
-                            if highest_aser_rel:
+                            if aser_rel_format == "highest_aser_rel":
                                 # select the aser relation with the highest weight as the relation
                                 # discard other relations
-                                rel, weight = sorted(relations, key=lambda x:x[1], reverse=True)[0]
+                                sorted_rel_weight = sorted(relations, key=lambda x:x[1], reverse=True)
+                                if len(sorted_rel_weight) >= 2 and sorted_rel_weight[0][0] == self.rel2id["Co_Occurrence"]:
+                                    rel, weight = sorted_rel_weight[1]
+                                else:
+                                    rel, weight = sorted_rel_weight[0]
+                                self.adj_list[self.node2id[head]].append((self.node2id[tail], rel))
+                            elif aser_rel_format == "concate_aser_rel":
+                                sorted_rel_weight = sorted(relations, key=lambda x:x[1], reverse=True)
+                                rel = ", ".join([self.id2rel[rel] for rel, weight in sorted_rel_weight if weight >= 1])
+                                if len(rel) == 0:
+                                    rel, weight = sorted_rel_weight[0]
                                 self.adj_list[self.node2id[head]].append((self.node2id[tail], rel))
                             else:
                                 # include all relations

@@ -70,8 +70,12 @@ parser.add_argument("--evaluation_file_path",
                     help="Path to the evaluation set csv.")
 
 # data related
-parser.add_argument("--highest_aser_rel", action="store_true",
-                        help="whether to use select the aser relation with the highest weight")
+parser.add_argument("--aser_rel_format", default="all_aser_rel",
+                        choices=["all_aser_rel", "highest_aser_rel", "concate_aser_rel"],
+                        help="how to make use of ASER edges."
+                        "all: used in the EMNLP 2021 paper. regard each relation as a sperate edge."
+                        "highest_aser_rel: select the ASER relation with the highest weight (except for Co_occurence) as the edge for training and testing."
+                        "concate_aser_rel: concatenate all relations whose weights are larger than a threshold in one string")
 parser.add_argument("--target_relation", default='all', type=str, required=False,
                     help="target relation. all or one of the commonsense relations.")
 parser.add_argument("--target_dataset", default='all', type=str, required=False,
@@ -124,7 +128,8 @@ file_path = args.file_path
 
 # whether it's a triple classification task (h, r, t)
 rel_in_edge = "rel_in_edge" if ("va" in args.model or "relational" in args.model) else ""
-highest_aser_rel = "_highest_aser_rel" if args.highest_aser_rel else ""
+# highest_aser_rel = "_highest_aser_rel" if args.highest_aser_rel else ""
+aser_rel_format = "_" + args.aser_rel_format
 use_nl_rel = "_use_nl_rel" if args.use_nl_relation else ""
 save_tokenized = "_save_token" if args.save_tokenized else ""
 
@@ -136,7 +141,7 @@ graph_cache = graph_cache.format(f"{args.negative_sample}-{args.neg_prop}",
                                  args.load_edge_types,
                                  os.path.basename(file_path).rsplit(".", 1)[0],
                                  relation_string,
-                                 rel_in_edge + highest_aser_rel + use_nl_rel + save_tokenized)
+                                 rel_in_edge + aser_rel_format + use_nl_rel + save_tokenized)
 
 if not os.path.exists(args.model_dir):
     os.mkdir(args.model_dir)
@@ -204,7 +209,7 @@ if not os.path.exists(graph_cache):
         edge_include_rel=("va" in args.model or "relational" in args.model),
         negative_sample=args.negative_sample, load_edge_types=args.load_edge_types,
         neg_prop=neg_prop,
-        highest_aser_rel=args.highest_aser_rel,
+        aser_rel_format=args.aser_rel_format,
         use_nl_rel=args.use_nl_relation,
         save_tokenized=args.save_tokenized)
     with open(graph_cache, "wb") as writer:
@@ -289,7 +294,7 @@ dataset_tst.insert(len(dataset_tst.columns), "prediction_value", np.zeros((len(d
 dataset_tst.insert(len(dataset_tst.columns), "final_label", np.zeros((len(dataset_tst), 1), dtype=np.int64))
 
 for epoch in range(num_epochs):
-    for batch in data_loader.get_batch(batch_size=batch_size, mode="train"):
+    for batch in tqdm(data_loader.get_batch(batch_size=batch_size, mode="train")):
         step += 1
         if step % args.decay_every == 0:
             my_lr_scheduler.step()
