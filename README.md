@@ -1,6 +1,29 @@
 # CSKB-Population
 Codes for the EMNLP2021 paper: [Benchmarking Commonsense Knowledge Base Population with an Effective Evaluation Dataset](https://arxiv.org/abs/2109.07679)
 
+## Environment
+
+We tested our codes on `python 3.8.5`. Here are some packages their corresponding versions.
+
+```
+networkx                 2.5
+numpy                    1.19.2
+pandas                   1.2.2
+scikit-learn             0.24.1
+scipy                    1.6.3
+sklearn                  0.0
+spacy                    3.2.0
+stanfordnlp              0.2.0
+torch                    1.7.1
+torch-geometric          1.7.2
+torch-scatter            2.0.7
+torch-sparse             0.6.9
+torchsummary             1.5.1
+torchtext                0.8.1
+tqdm                     4.56.0
+transformers             3.4.0
+```
+
 ## Dataset Preprocess
 
 ### Prerequisite
