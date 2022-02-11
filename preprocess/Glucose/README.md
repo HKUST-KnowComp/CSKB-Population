@@ -71,7 +71,8 @@ Before parsing, you'll have to prepare the Stanford CoreNLP parser
 from [this webpage](https://stanfordnlp.github.io/CoreNLP/) and the spacy parser from [here](https://spacy.io/usage).
 
 You'll also need the parser and merged eventuality cache from [ASER](https://hkust-knowcomp.github.io/ASER/). Move the
-merged event to the `dataset` folder and name it as `merged_event.npy`.
+merged event to the `dataset` folder and name it as `merged_event.npy`, the file can be downloaded
+at [here](https://hkustconnect-my.sharepoint.com/:u:/g/personal/wwangbw_connect_ust_hk/EQE6rYNuzTRImQ4O4NuemM0BPdVKd9Un5_C1lhnJsKUT-A?e=WbxQNW).
 
 To reduce the parsing time, we separated the parsing process for each GLUCOSE list. The thorough parsing process will
 take less than 20 days without separating, separating it into 10 procedures can reduce the time to 1 day.
